@@ -9,6 +9,7 @@ Personal yt-dlp frontend. Paste URL → download with progress → stream from l
 | [backend/FLOWS.md](backend/FLOWS.md) | FastAPI routes, yt-dlp download (poll + WS), FFmpeg, in-memory job store, Prometheus metrics |
 | [frontend/FLOWS.md](frontend/FLOWS.md) | React pages, routing, Tailwind patterns, WS multiplexing, video player |
 | [k6/README.md](k6/README.md) | Load test scenarios, how to run, how to read results |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml) | GitHub Actions CI — pytest + vitest + docker build |
 
 ---
 
@@ -64,6 +65,23 @@ Volume: `C:\Users\ACER\Desktop\YT-Videos` → `/videos` in both `backend` and `n
 → Run both pages side-by-side. Poll bar jumps every ~1s. WS bar moves per chunk (sub-second).
 → [backend/FLOWS.md](backend/FLOWS.md) — Download Flow A vs B
 → [frontend/FLOWS.md](frontend/FLOWS.md) — DownloadPoll vs DownloadWS page flows
+
+### I want to add a new UI component
+→ Atom (pure display, no logic) → `frontend/src/atoms/` + export from `atoms/index.js`
+→ Molecule (atoms + small interaction) → `frontend/src/molecules/` + export from `molecules/index.js`
+→ [frontend/FLOWS.md](frontend/FLOWS.md) — "Component Hierarchy" section
+
+### I want to run all tests locally
+```bash
+# Backend
+PYTHONPATH=backend pytest backend/tests/ -v
+# Frontend
+cd frontend && npm run test:run
+```
+
+### I want to run a load test
+→ [k6/README.md](k6/README.md) — install + run commands
+→ Compare Poll vs WS smoothness by running both pages side by side during a k6 spike
 
 ### I want to add more Prometheus metrics (e.g. active downloads count)
 → `backend/main.py` — import `prometheus_client`, add `Gauge` or `Counter` before `Instrumentator()`

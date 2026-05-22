@@ -1,6 +1,32 @@
 # Frontend FLOWS
 
-Files: src/main.jsx, src/App.jsx, src/index.css, src/pages/Library.jsx, src/pages/DownloadPoll.jsx, src/pages/DownloadWS.jsx, vite.config.js, tailwind.config.js, postcss.config.js
+Files: src/main.jsx, src/App.jsx, src/index.css, src/atoms/*, src/molecules/*, src/pages/*, vite.config.js, tailwind.config.js
+
+---
+
+## Component Hierarchy (Atomic Design)
+
+```
+atoms/      Smallest units — no logic, props → HTML only
+  Button    variant: primary | success | danger | ghost
+  Input     accent: blue | emerald (focus ring colour)
+  ProgressBar  value (0-100), color, error flag
+  Badge     status string → coloured label
+
+molecules/  2-3 atoms + small interaction
+  DownloadInput  Input + Button, owns its own value state, calls onSubmit(url)
+  VideoCard      filename + size + Play/Close + Delete buttons
+  JobRow         URL + ProgressBar + Badge + speed/eta + dismiss button
+
+pages/      State + data fetching, composes molecules
+  Library        useEffect fetch, plays video via nginx static serving
+  DownloadPoll   setInterval polling loop
+  DownloadWS     wsMap multiplexing
+```
+
+**Rule:** if a page exceeds ~80 lines, extract an organism (`organisms/` layer between molecules and pages).
+To add a new atom: create `src/atoms/MyAtom.jsx`, export from `src/atoms/index.js`
+To add a new molecule: create `src/molecules/MyMolecule.jsx`, export from `src/molecules/index.js`
 
 ---
 
@@ -191,5 +217,11 @@ Tailwind removes unused classes at build time — only classes that appear liter
 | Vite dev proxy target        | `vite.config.js` → `server.proxy`                 |
 | Build output directory       | `vite.config.js` → `build.outDir` (default: dist) |
 | Global CSS / fonts           | `src/index.css`                                    |
-| WS concurrent download limit | `DownloadWS.jsx` → check `wsMap.current.size` in `startDownload()` |
+| WS concurrent download limit | `DownloadWS.jsx` → check `wsMap.current.size` in `handleSubmit()` |
 | Video player max height      | `Library.jsx` → `<video className="max-h-[480px]">` |
+| Button colours / variants    | `atoms/Button.jsx` → `VARIANTS` object |
+| Progress bar colour          | `atoms/ProgressBar.jsx` → `color` prop default |
+| Badge status colours         | `atoms/Badge.jsx` → `STATUS_STYLES` object |
+| Input focus ring colours     | `atoms/Input.jsx` → `ACCENTS` object |
+| Run frontend tests           | `cd frontend && npm run test:run` |
+| Run backend tests            | `PYTHONPATH=backend pytest backend/tests/ -v` |

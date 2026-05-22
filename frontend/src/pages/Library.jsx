@@ -1,15 +1,11 @@
 import { useEffect, useState } from 'react'
-
-function formatBytes(bytes) {
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`
-}
+import { VideoCard } from '../molecules'
 
 export default function Library() {
   const [videos, setVideos]   = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
-  const [playing, setPlaying] = useState(null)  // filename of the video currently open in the player
+  const [playing, setPlaying] = useState(null)
 
   useEffect(() => {
     fetch('/api/videos/')
@@ -32,16 +28,10 @@ export default function Library() {
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Library</h1>
 
-      {/* Inline video player — appears when a video is selected */}
       {playing && (
         <div className="bg-zinc-900 rounded overflow-hidden">
-          {/*
-            nginx serves /videos/ as static files with range request support.
-            The browser sends "Range: bytes=X-Y" automatically when the user seeks —
-            nginx slices the file and returns just that chunk. No backend involved.
-          */}
           <video
-            key={playing}              // key= forces React to remount when the video changes
+            key={playing}
             src={`/videos/${encodeURIComponent(playing)}`}
             controls
             autoPlay
@@ -49,7 +39,7 @@ export default function Library() {
           />
           <div className="flex justify-between items-center px-3 py-2 text-sm text-zinc-400">
             <span className="truncate">{playing}</span>
-            <button onClick={() => setPlaying(null)} className="text-zinc-500 hover:text-zinc-300 ml-2 shrink-0">
+            <button onClick={() => setPlaying(null)} className="text-zinc-500 hover:text-zinc-300 ml-2">
               Close
             </button>
           </div>
@@ -58,30 +48,14 @@ export default function Library() {
 
       <ul className="space-y-2">
         {videos.map(v => (
-          <li key={v.name} className="flex items-center justify-between bg-zinc-900 rounded p-3">
-            <div className="min-w-0 mr-3">
-              <p className="font-medium text-sm truncate">{v.name}</p>
-              <p className="text-xs text-zinc-400">{formatBytes(v.size)}</p>
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <button
-                onClick={() => setPlaying(playing === v.name ? null : v.name)}
-                className={`text-sm px-3 py-1 rounded ${
-                  playing === v.name
-                    ? 'bg-zinc-700 text-zinc-300'
-                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                }`}
-              >
-                {playing === v.name ? 'Close' : 'Play'}
-              </button>
-              <button
-                onClick={() => deleteVideo(v.name)}
-                className="text-red-400 hover:text-red-300 text-sm"
-              >
-                Delete
-              </button>
-            </div>
-          </li>
+          <VideoCard
+            key={v.name}
+            name={v.name}
+            size={v.size}
+            isPlaying={playing === v.name}
+            onPlay={() => setPlaying(playing === v.name ? null : v.name)}
+            onDelete={() => deleteVideo(v.name)}
+          />
         ))}
       </ul>
     </div>
