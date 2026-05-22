@@ -9,16 +9,51 @@ __pycache__/
 venv/
 dist/
 *.egg
+*.db
+*.sqlite
+*.log
 
 # Node
 node_modules/
 frontend/dist/
 frontend/.env
+.next/
 
 # Docker
 *.env
 .env.local
+.env.*
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/.idea/
+*.apk
+*.aar
+*.keystore
+*.jks
+
+# Java / Kotlin
+*.class
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Misc
+*.tmp
+tmp/
+k6-results/
+prometheus_data/
+grafana_data/

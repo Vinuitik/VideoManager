@@ -14,7 +14,7 @@ services:
       context: .
       dockerfile: nginx/Dockerfile
     ports:
-      - "8091:8091"
+      - "8091:80"
     volumes:
       # nginx streams video files directly — no backend involved
       - C:/Users/ACER/Desktop/YT-Videos:/videos:ro
