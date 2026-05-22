@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/library">
+
+    <fragment
+        android:id="@+id/library"
+        android:name="com.videomanager.library.LibraryFragment"
+        android:label="Library" />
+
+    <fragment
+        android:id="@+id/download"
+        android:name="com.videomanager.download.DownloadFragment"
+        android:label="Download" />
+
+</navigation>
