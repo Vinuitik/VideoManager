@@ -191,6 +191,56 @@ Tailwind removes unused classes at build time — only classes that appear liter
 
 ---
 
+## Test Suite
+
+Files: src/__tests__/atoms/Button.test.jsx, src/__tests__/atoms/ProgressBar.test.jsx, src/__tests__/molecules/DownloadInput.test.jsx, src/__tests__/molecules/JobRow.test.jsx
+
+**Runner:** `cd frontend && npm run test:run`
+**Framework:** Vitest + `@testing-library/react` + `@testing-library/user-event` + jsdom
+
+Only atoms and molecules are tested — pages are not (they own network calls; those are covered by backend tests). Rule: if a page exceeds ~80 lines, extract organisms and test those.
+
+### Button.test.jsx
+
+| Test | Covers |
+|---|---|
+| renders children | text appears in DOM |
+| calls onClick when clicked | `vi.fn()` spy receives one call via `userEvent.click` |
+| does not call onClick when disabled | `disabled` prop blocks click event |
+| applies danger variant class | `variant="danger"` → element has `text-red-400` |
+
+### ProgressBar.test.jsx
+
+| Test | Covers |
+|---|---|
+| sets width to value | `value={42}` → `style.width === "42%"` on the inner `.transition-all` div |
+| clamps value above 100 | `value={150}` → `width: 100%` |
+| uses red colour on error | `error` prop → inner div has `bg-red-500` |
+
+### DownloadInput.test.jsx
+
+| Test | Covers |
+|---|---|
+| calls onSubmit with typed URL on button click | `userEvent.type` + `userEvent.click("Download")` → `onSubmit("https://...")` |
+| calls onSubmit on Enter key | `{Enter}` in `userEvent.type` triggers submit |
+| clears input after submit | input value is `""` after `onSubmit` fires |
+| does not call onSubmit when disabled | `disabled` prop blocks the button |
+
+### JobRow.test.jsx
+
+| Test | Covers |
+|---|---|
+| shows the URL | URL string appears in DOM |
+| shows speed and eta while downloading | `"1.2MB/s — 30s"` text visible |
+| calls onDismiss when ✕ clicked | dismiss button invokes `onDismiss` spy |
+| shows error text on error status | `status="error"` + `error="..."` → error string rendered |
+
+To add tests for a new atom/molecule: create `src/__tests__/<layer>/MyComponent.test.jsx` — no config changes needed, Vitest picks it up automatically.
+To add a `vi.fn()` spy: `const fn = vi.fn()` then assert with `expect(fn).toHaveBeenCalledWith(...)`.
+To test a component that fetches data: use `vi.mock` to stub `fetch`, or extract the fetch logic out of the component so the component itself is pure enough to test without mocking.
+
+---
+
 ## Debugging Guide
 
 | Symptom | Where to look |

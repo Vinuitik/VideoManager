@@ -180,6 +180,65 @@ WebSocket stickiness problem at scale: a WS connection must stay on the same ser
 
 ---
 
+## Test Suite
+
+Files: tests/conftest.py, tests/test_unit.py, tests/test_videos.py, tests/test_download_poll.py, tests/test_process.py
+
+**Runner:** `PYTHONPATH=backend pytest backend/tests/ -v`
+
+**Fixture:** `conftest.py` — `client` fixture wraps the FastAPI app in `TestClient` (synchronous, no real HTTP, no running server needed).
+
+### test_unit.py — pure function tests, no I/O, fastest
+
+| Class | What it tests |
+|---|---|
+| `TestParseProgress` | `parse_progress()` normalises raw yt-dlp hook dicts: correct `%` parsing, `N/A` fallback on malformed input, missing-key safety, filename carried on `finished` status |
+| `TestStateNewJob` | `state.new_job()` returns UUID4, registers job in `state.jobs`, sets initial status `"queued"` and `progress=0.0` |
+| `TestProcessorPresets` | `services/processor.PRESETS` — all values are non-empty strings, `boost_2x` and `normalize` exist |
+
+### test_videos.py — video CRUD integration
+
+```
+client fixture + monkeypatch swaps VIDEOS_DIR → tmp_path (no real disk side-effects)
+```
+
+| Test | Covers |
+|---|---|
+| `test_health` | `GET /api/health` → 200 `{status: ok}` |
+| `test_list_videos_empty` | empty folder → `[]` |
+| `test_list_videos_returns_files` | file written to tmp_path appears in response |
+| `test_delete_video` | `DELETE /api/videos/clip.mp4` → 200, file gone from disk |
+| `test_delete_missing_video_returns_404` | 404 on non-existent file |
+| `test_delete_path_traversal_blocked` | `../../../etc/passwd` → 400 or 404 (path traversal guard) |
+
+### test_download_poll.py — polling download flow
+
+`_run_download` is patched with `unittest.mock.patch` so no real yt-dlp call happens.
+
+| Test | Covers |
+|---|---|
+| `test_start_download_returns_job_id` | POST → `{job_id}` is a 36-char UUID4 |
+| `test_poll_job_queued` | `GET /api/v1/jobs/{id}` → status in `{queued, downloading, done}` |
+| `test_poll_missing_job_returns_404` | unknown job_id → 404 |
+| `test_job_reflects_progress` | writes directly into `state.jobs`, polls endpoint, asserts `progress` and `speed` match |
+
+### test_process.py — FFmpeg processing
+
+`process_video` is patched with `AsyncMock` so no real ffmpeg binary needed.
+
+| Test | Covers |
+|---|---|
+| `test_list_presets` | `GET /api/process/presets` → `boost_2x` and `normalize` present |
+| `test_process_missing_file_returns_404` | non-existent file → 404 |
+| `test_process_unknown_preset_returns_400` | bad preset name → 400 |
+| `test_process_calls_ffmpeg` | mocked `process_video` → 200, filename in response |
+
+To add a test for a new router: create `tests/test_myrouter.py`, import and use the `client` fixture from conftest — no other setup needed.
+To test a new pure function: add to `test_unit.py` — no fixture, no patching.
+To debug a test that patches the wrong module: the patch path must match where the name is *used*, not where it is defined (e.g. `routers.process.process_video`, not `services.processor.process_video`).
+
+---
+
 ## Change Index
 
 | Thing to change              | Where                                              |
