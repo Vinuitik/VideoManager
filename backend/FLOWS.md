@@ -7,19 +7,21 @@ Files: main.py, config.py, state.py, routers/videos.py, routers/download_poll.py
 ## Video CRUD Flow
 
 ```
-GET /api/videos
-  → videos.list_videos()
+GET /api/videos/
+  → routers/videos.list_videos()
   → Path(VIDEOS_DIR).iterdir()
-  → [{name, size, modified_at}]  sorted newest-first
+  → sorted by mtime descending
+  → [{name, size, modified_at}]
 
 DELETE /api/videos/{filename}
-  → videos.delete_video()
-  → path traversal guard (path.is_relative_to(videos_root))
+  → routers/videos.delete_video()
+  → path.resolve().is_relative_to(videos_root)  ← path traversal guard
   → path.unlink()
 ```
 
-To change watched folder: `VIDEOS_DIR` env var → `config.VIDEOS_DIR`
-To add metadata (duration, thumbnail): `routers/videos.list_videos()` — call yt-dlp's `extract_info(download=False)` per file
+To change the watched folder: `VIDEOS_DIR` env var → `config.VIDEOS_DIR`
+To add metadata (duration, thumbnail): `routers/videos.list_videos()` — call `yt_dlp.YoutubeDL().extract_info(path, download=False)` per file (slow; cache results)
+To debug "file not found" on delete: check that `VIDEOS_DIR` inside the container matches the volume mount in `docker-compose.yml`
 
 ---
 
@@ -27,26 +29,27 @@ To add metadata (duration, thumbnail): `routers/videos.list_videos()` — call y
 
 ```
 POST /api/v1/download {url}
-  → download_poll.start_download_poll()
-  → state.new_job(url)  →  state.jobs[job_id] = Job(...)
+  → routers/download_poll.start_download_poll()
+  → state.new_job(url)          creates Job in state.jobs dict, returns job_id
   → BackgroundTasks.add_task(_run_download, job)
-       [background thread]
-       → download_sync(url, hook)  ← services/downloader.py
+       [FastAPI runs sync tasks in a threadpool — does not block the event loop]
+       → services/downloader.download_sync(url, hook)
            → yt_dlp.YoutubeDL(build_ydl_opts(hook)).download([url])
-           → hook(d) called per chunk:
-               d["status"] == "downloading"  →  job.progress / speed / eta updated in state.jobs
+           → hook(d) fires per downloaded chunk:
+               d["status"] == "downloading"  →  job.progress / speed / eta  (mutates state.jobs entry)
                d["status"] == "finished"     →  job.status = "done"
-  → returns {job_id}
+  → returns {job_id}   immediately, before download starts
 
 GET /api/v1/jobs/{job_id}
-  → download_poll.get_job()
-  → reads state.jobs[job_id]  (plain dict read, no I/O)
-  → returns {status, progress, speed, eta, filename, error}
+  → routers/download_poll.get_job()
+  → plain dict read from state.jobs — no I/O, returns in microseconds
+  → {status, progress, speed, eta, filename, error}
 ```
 
-To change download format/quality: `services/downloader.build_ydl_opts()` → `format` key
-To change progress fields returned: `download_poll._run_download()` hook + `get_job()` response dict
-To swap in-memory dict for Redis: replace `state.jobs` with a Redis client in `state.py`
+To change download format/quality: `services/downloader.build_ydl_opts()` → `format` key (yt-dlp format selector string)
+To change what fields the poll returns: `routers/download_poll.get_job()` response dict + `_run_download()` hook
+To add download to a subfolder (e.g. by channel): `build_ydl_opts()` → `outtmpl` template string
+To debug a stuck job: check `state.jobs[job_id].status` — if "queued" forever, the background thread likely threw before the hook fired; add `print` in `_run_download` try/except
 
 ---
 
@@ -54,26 +57,29 @@ To swap in-memory dict for Redis: replace `state.jobs` with a Redis client in `s
 
 ```
 WS /api/v2/download
-  → ws_download.ws_download()
+  → routers/download_ws.ws_download()
   → websocket.accept()
   → websocket.receive_json()  →  {url}
-  → asyncio.Queue() created  (thread-safe bridge between yt-dlp thread and async WS)
-  → loop.run_in_executor(None, run)  [yt-dlp starts in thread pool]
-       → build_ydl_opts(hook)  ← services/downloader.py
+  → asyncio.Queue() created   (thread-safe pipe: yt-dlp thread → async WS handler)
+  → loop.run_in_executor(None, run)    starts yt-dlp in thread pool
+       → build_ydl_opts(hook)  ← services/downloader.py (same opts as Poll)
        → hook(d):
            loop.call_soon_threadsafe(queue.put_nowait, {type, progress, speed, eta})
-           sentinel (None) put when thread finishes
-  → async while loop: msg = await queue.get()
-       → websocket.send_json(msg)  per progress event (sub-second)
-       → breaks on sentinel, closes socket
+           None (sentinel) put when thread exits — signals async reader to stop
+  → async while loop:
+       msg = await queue.get()
+       if msg is None: break
+       websocket.send_json(msg)
+  → websocket.close()
 ```
 
-Key concept: `loop.call_soon_threadsafe()` is the bridge — yt-dlp runs in a thread
-(no async), but the WebSocket lives in the async event loop. This is the standard
-pattern for mixing sync libs with async frameworks.
+Key concept — why `call_soon_threadsafe`: yt-dlp runs in a thread (no async); the WebSocket lives in the event loop. Directly calling `queue.put_nowait` from the thread would be a race condition. `call_soon_threadsafe` schedules the put on the event loop safely.
 
-To change WebSocket message shape: `download_ws.ws_download()` inner `hook()` function
-To add job_id multiplexing (multiple downloads, one WS): add `job_id` field to each message, route client-side by it
+**Current limitation:** one WebSocket per download. The frontend (`DownloadWS.jsx`) holds one `wsRef` — starting a second download closes the first connection. To fix: add `job_id` to every message, open a single persistent WS in the frontend, demultiplex by `job_id` in `ws.onmessage`.
+
+To change WebSocket message fields: `routers/download_ws.ws_download()` inner `hook()` function
+To debug "WebSocket closed immediately": nginx `proxy_read_timeout` in `nginx/nginx.conf` — default is 60s; long downloads need it higher (already set to 3600s)
+To debug progress not showing: add `print(d)` inside `hook()` — check that yt-dlp is actually firing the hook (some formats don't report progress)
 
 ---
 
@@ -81,31 +87,65 @@ To add job_id multiplexing (multiple downloads, one WS): add `job_id` field to e
 
 ```
 GET /api/process/presets
-  → returns list(PRESETS.keys())
+  → returns list(PRESETS.keys())   use this to populate a dropdown in the UI
 
 POST /api/process {filename, preset, overwrite}
-  → process.run_process()
+  → routers/process.run_process()
   → path traversal guard
-  → PRESETS[preset]  →  af_filter string  ← services/processor.PRESETS
+  → services/processor.PRESETS[preset]  →  af_filter string
   → asyncio.create_subprocess_exec("ffmpeg", "-i", input, "-af", filter, output, "-y")
-  → await proc.communicate()
-  → returns {filename}
+       [proper async subprocess — does not block event loop]
+  → await proc.communicate()  →  waits for ffmpeg to finish
+  → returns {filename}   (new file if overwrite=False, same file if overwrite=True)
 ```
 
-To add a new FFmpeg preset: `services/processor.PRESETS` — add `"name": "ffmpeg_filter_string"`
-To make processing report progress: switch to `ffmpeg -progress pipe:1` and stream stderr — same pattern as WS download
+To add a new FFmpeg preset: `services/processor.PRESETS` → add `"name": "ffmpeg_audio_filter_string"`
+Examples: `"denoise": "afftdn"`, `"speed_2x": "atempo=2.0"`, `"eq_bass": "equalizer=f=100:width_type=o:width=2:g=6"`
+To make processing show progress: switch to `ffmpeg -progress pipe:1 -nostats` and parse stderr line by line — same queue pattern as WS download
+To debug ffmpeg errors: `routers/process.run_process()` raises `HTTPException(500, stderr)` — the raw ffmpeg error string is returned to the client
 
 ---
 
 ## Request Routing (main.py)
 
-| Prefix         | Router file              | Purpose                  |
-|----------------|--------------------------|--------------------------|
-| /api/videos    | routers/videos.py        | CRUD — list, delete      |
-| /api/v1        | routers/download_poll.py | Download + poll endpoint |
-| /api/v2        | routers/download_ws.py   | Download via WebSocket   |
-| /api/process   | routers/process.py       | FFmpeg post-processing   |
-| /api/health    | main.py                  | Health check for Docker  |
+| Prefix        | Router                   | Purpose                        |
+|---------------|--------------------------|--------------------------------|
+| /api/videos   | routers/videos.py        | CRUD — list, delete            |
+| /api/v1       | routers/download_poll.py | Download + job poll endpoint   |
+| /api/v2       | routers/download_ws.py   | Download via WebSocket         |
+| /api/process  | routers/process.py       | FFmpeg post-processing         |
+| /api/health   | main.py inline           | Docker health check            |
+
+To add a new API resource: create `routers/myrouter.py`, add `app.include_router(myrouter.router, prefix="/api/x")` in `main.py`
+
+---
+
+## Debugging Guide
+
+| Symptom | Where to look |
+|---------|--------------|
+| Download never starts | `state.jobs[job_id].status` stuck at "queued" → check `_run_download` exception in logs |
+| Progress stuck at 0% | yt-dlp hook not firing → add `print(d)` in `hook()`, check format supports progress |
+| WebSocket closes immediately | nginx `proxy_read_timeout` in `nginx/nginx.conf` |
+| FFmpeg produces no output | `run_process()` stderr is returned in HTTP 500 response body |
+| File not found on delete | `VIDEOS_DIR` env var mismatch with volume mount in `docker-compose.yml` |
+| yt-dlp format error | `build_ydl_opts()` → `format` key — check yt-dlp format selector syntax |
+
+---
+
+## Scaling Guide (for reference — not needed now)
+
+Current: in-memory `state.jobs` dict, single process.
+
+To scale to multiple workers:
+1. Replace `state.jobs` dict with Redis (`pip install redis`, `redis.StrictRedis().hset(job_id, ...)`)
+2. Replace `BackgroundTasks` with a job queue (Celery + Redis broker, or ARQ)
+3. Run multiple uvicorn workers (`--workers 4`) or multiple containers
+4. nginx already load-balances if you add multiple backend replicas in docker-compose
+
+WebSocket stickiness problem at scale: a WS connection must stay on the same server. Solutions:
+- nginx `ip_hash` for sticky routing (simple, imperfect)
+- Pub/sub broker (Redis pub/sub) so any server can forward progress to any client
 
 ---
 
@@ -115,9 +155,11 @@ To make processing report progress: switch to `ffmpeg -progress pipe:1` and stre
 |------------------------------|----------------------------------------------------|
 | Videos folder path           | `VIDEOS_DIR` env var → `config.VIDEOS_DIR`         |
 | Download format / quality    | `services/downloader.build_ydl_opts()` → `format`  |
-| Progress fields (poll)       | `routers/download_poll._run_download()` hook        |
-| Progress fields (WebSocket)  | `routers/download_ws.ws_download()` hook            |
+| yt-dlp output filename/path  | `services/downloader.build_ydl_opts()` → `outtmpl`  |
+| Progress fields (poll)       | `routers/download_poll._run_download()` hook + `get_job()` |
+| Progress fields (WebSocket)  | `routers/download_ws.ws_download()` inner `hook()` |
 | In-memory store → Redis      | `state.py` → swap `jobs` dict for Redis client     |
 | FFmpeg presets               | `services/processor.PRESETS`                       |
 | API route prefixes           | `main.py` → `app.include_router(..., prefix=...)`  |
 | Python version / OS packages | `backend/Dockerfile`                               |
+| nginx WS timeout             | `nginx/nginx.conf` → `proxy_read_timeout`          |
