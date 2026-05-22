@@ -1,0 +1,21 @@
+services:
+
+  backend:
+    build: ./backend
+    environment:
+      VIDEOS_DIR: /videos
+    volumes:
+      # Mount your local video folder into the container
+      - C:/Users/ACER/Desktop/YT-Videos:/videos
+    # Only expose internally — nginx is the public entry point
+    expose:
+      - "8000"
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
