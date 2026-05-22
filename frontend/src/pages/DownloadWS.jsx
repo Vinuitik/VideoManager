@@ -1,59 +1,94 @@
 import { useState, useRef } from 'react'
 
+// Each entry in the downloads map: { url, status, progress, speed, eta, filename }
+// wsMap holds the actual WebSocket objects — kept in a ref so they don't trigger re-renders
+
 export default function DownloadWS() {
   const [url, setUrl] = useState('')
-  const [progress, setProgress] = useState(null)  // null = no active download
-  const [error, setError] = useState(null)
-  const wsRef = useRef(null)  // hold WebSocket instance across renders
+  const [downloads, setDownloads] = useState({})  // { [jobId]: progressState }
+  const wsMap = useRef(new Map())                  // { jobId -> WebSocket }
 
   function startDownload() {
-    setError(null)
-    setProgress({ status: 'connecting', progress: 0, speed: '', eta: '' })
+    if (!url.trim()) return
 
-    // ws:// in dev (Vite proxy handles it); in prod nginx upgrades the connection
+    // Client generates the job ID — no server round-trip needed
+    const jobId = crypto.randomUUID()
+    const currentUrl = url
+    setUrl('')
+
+    // Register this download in state immediately so the row appears
+    setDownloads(prev => ({
+      ...prev,
+      [jobId]: { url: currentUrl, status: 'connecting', progress: 0, speed: '', eta: '', filename: '' },
+    }))
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${protocol}//${window.location.host}/api/v2/download`)
-    wsRef.current = ws
+    wsMap.current.set(jobId, ws)
 
     ws.onopen = () => {
-      // Once connected, send the URL as JSON — server starts downloading immediately
-      ws.send(JSON.stringify({ url }))
-      setProgress(p => ({ ...p, status: 'downloading' }))
+      ws.send(JSON.stringify({ url: currentUrl }))
+      updateDownload(jobId, { status: 'downloading' })
     }
 
     ws.onmessage = (event) => {
-      // Each message is a JSON packet from the server's hook()
       const msg = JSON.parse(event.data)
+
       if (msg.type === 'progress') {
-        setProgress({
+        updateDownload(jobId, {
           status: 'downloading',
           progress: parseFloat(msg.progress) || 0,
           speed: msg.speed,
           eta: msg.eta,
         })
       } else if (msg.type === 'done') {
-        setProgress(p => ({ ...p, status: 'done', progress: 100 }))
+        updateDownload(jobId, { status: 'done', progress: 100, filename: msg.filename })
+        wsMap.current.delete(jobId)
       } else if (msg.type === 'error') {
-        setError(msg.message)
-        setProgress(null)
+        updateDownload(jobId, { status: 'error', error: msg.message })
+        wsMap.current.delete(jobId)
       }
     }
 
-    ws.onerror = () => setError('WebSocket connection failed')
-    ws.onclose = () => {
-      // Ensure we show done state even if server closes before final message
-      setProgress(p => p && p.status === 'downloading' ? { ...p, status: 'done', progress: 100 } : p)
+    ws.onerror = () => updateDownload(jobId, { status: 'error', error: 'WebSocket error' })
+    ws.onclose  = () => {
+      // If still downloading when closed, mark done (server closed after finishing)
+      setDownloads(prev => {
+        const d = prev[jobId]
+        if (d && d.status === 'downloading') {
+          return { ...prev, [jobId]: { ...d, status: 'done', progress: 100 } }
+        }
+        return prev
+      })
     }
   }
 
-  const busy = progress && progress.status !== 'done' && progress.status !== 'error'
+  function updateDownload(jobId, patch) {
+    // Functional update avoids stale closure issues when multiple downloads update simultaneously
+    setDownloads(prev => ({
+      ...prev,
+      [jobId]: { ...prev[jobId], ...patch },
+    }))
+  }
+
+  function dismissDownload(jobId) {
+    wsMap.current.get(jobId)?.close()
+    wsMap.current.delete(jobId)
+    setDownloads(prev => {
+      const next = { ...prev }
+      delete next[jobId]
+      return next
+    })
+  }
+
+  const entries = Object.entries(downloads)
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold mb-1">Download — WebSocket</h1>
         <p className="text-sm text-zinc-400">
-          Progress is pushed by the server in real time over a persistent WS connection
+          Real-time progress per chunk. Multiple downloads run simultaneously — each on its own WS connection.
         </p>
       </div>
 
@@ -63,34 +98,53 @@ export default function DownloadWS() {
           placeholder="YouTube URL..."
           value={url}
           onChange={e => setUrl(e.target.value)}
-          disabled={busy}
+          onKeyDown={e => e.key === 'Enter' && startDownload()}
         />
         <button
           onClick={startDownload}
-          disabled={busy || !url}
+          disabled={!url.trim()}
           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded text-sm font-medium"
         >
           Download
         </button>
       </div>
 
-      {progress && (
-        <div className="space-y-2">
-          <div className="h-2 bg-zinc-800 rounded overflow-hidden">
-            <div
-              className="h-full bg-emerald-500 transition-all"
-              style={{ width: `${progress.progress}%` }}
-            />
-          </div>
-          <div className="flex justify-between text-sm text-zinc-400">
-            <span>{progress.status}</span>
-            <span>{progress.speed} — {progress.eta}</span>
-            <span>{progress.progress.toFixed(1)}%</span>
-          </div>
-        </div>
+      {entries.length === 0 && (
+        <p className="text-zinc-500 text-sm">No active downloads.</p>
       )}
 
-      {error && <p className="text-red-400 text-sm">{error}</p>}
+      <ul className="space-y-3">
+        {entries.map(([jobId, d]) => (
+          <li key={jobId} className="bg-zinc-900 rounded p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-sm truncate max-w-xs text-zinc-300">{d.url}</p>
+              <button
+                onClick={() => dismissDownload(jobId)}
+                className="text-zinc-500 hover:text-zinc-300 text-xs ml-2 shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="h-1.5 bg-zinc-800 rounded overflow-hidden">
+              <div
+                className={`h-full transition-all ${d.status === 'error' ? 'bg-red-500' : 'bg-emerald-500'}`}
+                style={{ width: `${d.progress}%` }}
+              />
+            </div>
+
+            <div className="flex justify-between text-xs text-zinc-400">
+              <span className={d.status === 'error' ? 'text-red-400' : ''}>
+                {d.status === 'error' ? d.error : d.status}
+              </span>
+              {d.status === 'downloading' && (
+                <span>{d.speed} — {d.eta}</span>
+              )}
+              <span>{d.progress.toFixed(1)}%</span>
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

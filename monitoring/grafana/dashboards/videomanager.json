@@ -1,0 +1,85 @@
+{
+  "title": "VideoManager",
+  "uid": "videomanager",
+  "schemaVersion": 38,
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "sum(rate(http_requests_total[1m])) by (handler)",
+        "legendFormat": "{{handler}}"
+      }],
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 2,
+      "title": "Error Rate (5xx / total)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m])) / sum(rate(http_requests_total[1m]))",
+        "legendFormat": "error rate"
+      }],
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 3,
+      "title": "Latency — p50 / p95 / p99 (seconds)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 4,
+      "title": "Service Availability (health check success rate)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 16, "w": 8, "h": 4 },
+      "targets": [{
+        "expr": "sum(rate(http_requests_total{handler=\"/api/health\",status=\"200\"}[5m])) / sum(rate(http_requests_total{handler=\"/api/health\"}[5m]))",
+        "legendFormat": "availability"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 5,
+      "title": "Total Requests",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 16, "w": 8, "h": 4 },
+      "targets": [{
+        "expr": "sum(http_requests_total)",
+        "legendFormat": "total"
+      }],
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 6,
+      "title": "Active Download Jobs",
+      "type": "stat",
+      "gridPos": { "x": 16, "y": 16, "w": 8, "h": 4 },
+      "targets": [{
+        "expr": "sum(rate(http_requests_total{handler=\"/api/v1/download\",status=\"200\"}[5m])) - sum(rate(http_requests_total{handler=~\"/api/v1/jobs/.*\",status=\"200\"}[5m]))",
+        "legendFormat": "approx active"
+      }],
+      "datasource": "Prometheus"
+    }
+  ]
+}

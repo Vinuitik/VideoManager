@@ -1,6 +1,6 @@
 # Backend FLOWS
 
-Files: main.py, config.py, state.py, routers/videos.py, routers/download_poll.py, routers/download_ws.py, routers/process.py, services/downloader.py, services/processor.py
+Files: main.py, config.py, state.py, routers/videos.py, routers/download_poll.py, routers/download_ws.py, routers/process.py, services/downloader.py, services/processor.py, requirements.txt
 
 ---
 
@@ -106,6 +106,37 @@ To debug ffmpeg errors: `routers/process.run_process()` raises `HTTPException(50
 
 ---
 
+## Prometheus Metrics Flow
+
+```
+Prometheus container (every 15s)
+  → GET backend:8000/metrics
+  → prometheus-fastapi-instrumentator returns text/plain metrics
+  → Prometheus stores as time series
+
+Grafana (on dashboard load / refresh)
+  → queries Prometheus via PromQL
+  → renders panels: request rate, error rate, latency p50/p95/p99, availability
+```
+
+Metrics automatically tracked per endpoint:
+- `http_requests_total{handler, method, status}` — count
+- `http_request_duration_seconds{handler, method, le}` — histogram (use for latency)
+- `http_request_size_bytes` / `http_response_size_bytes` — histograms
+
+To add a custom metric (e.g. active download count):
+```python
+# in main.py, before Instrumentator()
+from prometheus_client import Gauge
+active_downloads = Gauge("active_downloads_total", "Downloads currently in progress")
+# then in download_poll._run_download(): active_downloads.inc() / active_downloads.dec()
+```
+
+To open Grafana: http://localhost:3000 — no login required (anonymous admin)
+To debug "no data" in Grafana: check http://localhost:9090/targets — backend must show "UP"
+
+---
+
 ## Request Routing (main.py)
 
 | Prefix        | Router                   | Purpose                        |
@@ -163,3 +194,6 @@ WebSocket stickiness problem at scale: a WS connection must stay on the same ser
 | API route prefixes           | `main.py` → `app.include_router(..., prefix=...)`  |
 | Python version / OS packages | `backend/Dockerfile`                               |
 | nginx WS timeout             | `nginx/nginx.conf` → `proxy_read_timeout`          |
+| Prometheus scrape interval   | `monitoring/prometheus.yml` → `scrape_interval`    |
+| Grafana dashboard panels     | `monitoring/grafana/dashboards/videomanager.json`  |
+| Python dependencies          | `backend/requirements.txt`                        |

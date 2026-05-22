@@ -1,6 +1,6 @@
 # Frontend FLOWS
 
-Files: src/main.jsx, src/App.jsx, src/index.css, src/pages/Library.jsx, src/pages/DownloadPoll.jsx, src/pages/DownloadWS.jsx, vite.config.js, tailwind.config.js
+Files: src/main.jsx, src/App.jsx, src/index.css, src/pages/Library.jsx, src/pages/DownloadPoll.jsx, src/pages/DownloadWS.jsx, vite.config.js, tailwind.config.js, postcss.config.js
 
 ---
 
@@ -83,6 +83,29 @@ To debug progress bar not moving: open Network tab in devtools, watch `/api/v1/j
 
 ---
 
+## Library — Video Player Flow (Library.jsx)
+
+```
+play button click
+  → setPlaying(filename)
+  → <video src="/videos/{encodeURIComponent(filename)}" controls autoPlay> renders
+  → browser sends "Range: bytes=0-" to nginx
+  → nginx slices file from disk, returns chunk with Content-Range header
+  → browser plays; when user seeks: new Range request, nginx returns that slice
+
+close button click / delete
+  → setPlaying(null)   video element unmounts, playback stops
+```
+
+nginx serves `/videos/` as static files — range requests work automatically.
+FastAPI is NOT involved in video playback at all.
+
+To debug "video doesn't play": open DevTools → Network → filter `/videos/` — check nginx returns 206 Partial Content
+To add a subtitle track: extend the `<video>` with a `<track>` element, serve `.vtt` files from `/videos/`
+To add a seek-to-timestamp feature: use `videoRef.current.currentTime = seconds` on a `<video ref={videoRef}>`
+
+---
+
 ## Download WebSocket Page Flow (DownloadWS.jsx)
 
 ```
@@ -98,12 +121,15 @@ button click
   → ws.onclose:   guard ensures status shows "done" if server closes before final message
 ```
 
-**Current limitation:** `wsRef` holds one WebSocket. Starting download #2 before #1 finishes replaces the ref and you lose progress display for #1. The connection itself keeps running server-side.
-To support multiple concurrent WS downloads: store `wsRef` as a Map keyed by `job_id`, render a progress row per entry.
+**Multiplexing implemented.** Each `startDownload()` call opens its own WS and is tracked by a client-generated UUID in a `Map`. Multiple downloads render simultaneously.
 
-`wsRef = useRef(null)` avoids stale closure — if `wsRef` were a local variable it would be recreated every render and `ws.onmessage` would close over a stale version.
-To debug WS not connecting: check browser Network tab → WS tab — look for 101 Switching Protocols. If missing, nginx WS proxy headers may be wrong (`nginx/nginx.conf`)
-To debug progress not updating: `ws.onmessage` fires — add `console.log(event.data)` to confirm messages are arriving
+`wsMap = useRef(new Map())` — holds live WebSocket objects, keyed by jobId. Not state (no re-renders when updated). `downloads` state holds only plain progress data — triggers re-renders.
+
+`updateDownload` uses `setDownloads(prev => ...)` functional form — required when multiple downloads write simultaneously, otherwise they overwrite each other.
+
+To debug WS not connecting: Network tab → WS → look for 101 Switching Protocols; if missing, check `nginx/nginx.conf` WS proxy headers
+To add a download queue (sequential): hold a queue array in state, call `startDownload` inside `ws.onclose`
+To cap concurrent downloads: check `wsMap.current.size` before opening a new socket
 
 ---
 
@@ -165,3 +191,5 @@ Tailwind removes unused classes at build time — only classes that appear liter
 | Vite dev proxy target        | `vite.config.js` → `server.proxy`                 |
 | Build output directory       | `vite.config.js` → `build.outDir` (default: dist) |
 | Global CSS / fonts           | `src/index.css`                                    |
+| WS concurrent download limit | `DownloadWS.jsx` → check `wsMap.current.size` in `startDownload()` |
+| Video player max height      | `Library.jsx` → `<video className="max-h-[480px]">` |
