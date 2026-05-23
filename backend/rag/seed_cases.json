@@ -1,0 +1,137 @@
+[
+  {
+    "domain_pattern": "youtube.com",
+    "problem": "YouTube video returns HTTP 403 or 'Sign in to confirm your age' — age-restricted content",
+    "cot": "1. Age-restricted videos require a logged-in YouTube account. 2. yt-dlp can bypass this using cookies from a real browser session. 3. Try authenticate_headless with Google credentials to obtain session cookies. 4. Retry try_ytdlp with the cookies_path pointing to the saved session. 5. If still failing, add 'age_limit: 99' to extra_opts.",
+    "solution_steps": ["authenticate_headless(url='https://accounts.google.com/signin', domain='youtube.com')", "try_ytdlp(url=url, cookies_path=saved_cookies)"],
+    "requires_auth": false,
+    "requires_cookies": true,
+    "tags": ["youtube", "age-restricted", "403"]
+  },
+  {
+    "domain_pattern": "youtube.com",
+    "problem": "YouTube private video: 'Video unavailable' or 'This video is private'",
+    "cot": "1. Private videos require the account that owns or was invited to view the video. 2. Authenticate headlessly with Google credentials for the account that has access. 3. Retry try_ytdlp with session cookies. 4. If the account was not invited, the video is inaccessible — record as failure.",
+    "solution_steps": ["authenticate_headless(url='https://accounts.google.com/signin', domain='youtube.com')", "try_ytdlp(url=url, cookies_path=saved_cookies)"],
+    "requires_auth": true,
+    "requires_cookies": true,
+    "tags": ["youtube", "private", "unavailable"]
+  },
+  {
+    "domain_pattern": "twitter.com|x.com",
+    "problem": "Twitter/X video fails: format error, 403, or 'Could not find a video in this tweet'",
+    "cot": "1. Twitter/X changed their API and now requires authentication for video access. 2. First try with format selector 'best' — Twitter rejects complex selectors. 3. If still failing, authenticate headlessly with Twitter credentials to get session cookies. 4. Retry with cookies and 'best' format. 5. If the tweet URL uses x.com, try both x.com and twitter.com variants.",
+    "solution_steps": ["try_ytdlp(url=url, extra_opts={'format': 'best'})", "authenticate_headless(url='https://twitter.com/i/flow/login', domain='twitter.com')", "try_ytdlp(url=url, extra_opts={'format': 'best'}, cookies_path=saved_cookies)"],
+    "requires_auth": false,
+    "requires_cookies": true,
+    "tags": ["twitter", "x", "social-media", "format"]
+  },
+  {
+    "domain_pattern": "instagram.com",
+    "problem": "Instagram video or reel fails: 'Unable to download webpage' or login wall redirect",
+    "cot": "1. Instagram requires login for virtually all content including public reels. 2. Authenticate headlessly with Instagram credentials. 3. Retry try_ytdlp with session cookies. 4. For stories/highlights, ensure the URL format is correct (/reel/ID/ or /p/ID/). 5. If a two-factor challenge appears, the tool will return needs_input — handle it.",
+    "solution_steps": ["authenticate_headless(url='https://www.instagram.com/accounts/login/', domain='instagram.com')", "try_ytdlp(url=url, cookies_path=saved_cookies)"],
+    "requires_auth": true,
+    "requires_cookies": true,
+    "tags": ["instagram", "reel", "login-required", "403"]
+  },
+  {
+    "domain_pattern": "tiktok.com",
+    "problem": "TikTok download fails with HTTP error or produces watermarked/low-quality video",
+    "cot": "1. TikTok has aggressive bot detection that blocks standard yt-dlp user agents. 2. Try with a realistic browser User-Agent header first. 3. Use format selector 'best' — TikTok format IDs change frequently. 4. If the error mentions watermark, yt-dlp may be fetching the watermarked CDN — try extra_opts with {'format': 'bestvideo+bestaudio'}. 5. Some regions require cookies from a logged-in account.",
+    "solution_steps": ["try_ytdlp(url=url, extra_opts={'format': 'best', 'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}})"],
+    "requires_auth": false,
+    "requires_cookies": false,
+    "tags": ["tiktok", "bot-detection", "watermark", "user-agent"]
+  },
+  {
+    "domain_pattern": "vimeo.com",
+    "problem": "Vimeo returns 403 or 'Password required' — private or password-protected video",
+    "cot": "1. Vimeo has three access levels: public, link-only private, and password-protected. 2. For 403: try with vimeo.com cookies from a logged-in session first. 3. If the video is embedded on another site, a Referer header matching that site may be required — try extra_opts with http_headers Referer. 4. For password-protected: yt-dlp supports --video-password; pass it via extra_opts as {'videopassword': 'thepassword'}. 5. If none of these work, use inspect_page_network on the embedding page.",
+    "solution_steps": ["authenticate_headless(url='https://vimeo.com/log_in', domain='vimeo.com')", "try_ytdlp(url=url, cookies_path=saved_cookies)", "try_ytdlp(url=url, extra_opts={'http_headers': {'Referer': 'https://vimeo.com'}})"],
+    "requires_auth": false,
+    "requires_cookies": true,
+    "tags": ["vimeo", "private", "password-protected", "referer", "403"]
+  },
+  {
+    "domain_pattern": "twitch.tv",
+    "problem": "Twitch VOD fails: subscriber-only, 403, or 'This video is subscriber-only'",
+    "cot": "1. Twitch subscriber-only VODs require a logged-in account subscribed to the channel. 2. Authenticate headlessly with Twitch credentials. 3. Retry try_ytdlp with Twitch session cookies. 4. Distinguish between VOD URLs (/videos/ID) and live stream URLs (/channelname) — they need different handling. 5. Expired VODs (past 60 days for non-subs) cannot be recovered.",
+    "solution_steps": ["authenticate_headless(url='https://www.twitch.tv/login', domain='twitch.tv')", "try_ytdlp(url=url, cookies_path=saved_cookies)"],
+    "requires_auth": false,
+    "requires_cookies": true,
+    "tags": ["twitch", "vod", "subscriber-only", "403"]
+  },
+  {
+    "domain_pattern": "v.redd.it|reddit.com",
+    "problem": "Reddit video downloads without audio, or fails entirely on v.redd.it",
+    "cot": "1. Reddit hosts video and audio as separate DASH streams that must be merged. 2. yt-dlp requires ffmpeg to merge them — ensure ffmpeg is available. 3. Explicitly set format to 'bestvideo+bestaudio/best' to force the merge attempt. 4. If using a subreddit post URL, that is preferred over the direct v.redd.it link — try both. 5. NSFW subreddit content requires a logged-in Reddit account with NSFW content enabled in settings.",
+    "solution_steps": ["try_ytdlp(url=url, extra_opts={'format': 'bestvideo+bestaudio/best'})", "authenticate_headless(url='https://www.reddit.com/login', domain='reddit.com')", "try_ytdlp(url=url, extra_opts={'format': 'bestvideo+bestaudio/best'}, cookies_path=saved_cookies)"],
+    "requires_auth": false,
+    "requires_cookies": false,
+    "tags": ["reddit", "v.redd.it", "no-audio", "dash", "nsfw"]
+  },
+  {
+    "domain_pattern": ".*\\.edu|canvas|moodle|blackboard|brightspace|panopto|kaltura|mediasite",
+    "problem": "University LMS video: login wall, video served via HLS from CDN, URL not directly downloadable by yt-dlp",
+    "cot": "1. University LMS videos are behind authentication. The video file itself is typically an HLS (m3u8) stream served from a CDN like Panopto, Kaltura, or Mediasite — not from the LMS directly. 2. Step 1: authenticate_headless with university credentials on the LMS login page. 3. Step 2: use inspect_page_network on the video page — this loads the page in a real browser with your cookies and intercepts the actual HLS stream URL. 4. Step 3: the intercepted m3u8 URL (possibly with auth tokens in query string) is the real video — try_ytdlp directly on it. 5. Include any auth tokens exactly as intercepted — they are time-limited, act immediately.",
+    "solution_steps": ["authenticate_headless(url=lms_login_url, domain=university_domain)", "inspect_page_network(url=video_page_url)", "try_ytdlp(url=intercepted_m3u8_url)"],
+    "requires_auth": true,
+    "requires_cookies": true,
+    "tags": ["university", "lms", "canvas", "moodle", "panopto", "kaltura", "hls", "m3u8", "education"]
+  },
+  {
+    "domain_pattern": "linkedin.com",
+    "problem": "LinkedIn video fails: requires login, or 'This content is not available'",
+    "cot": "1. LinkedIn requires a logged-in account for virtually all content. 2. Authenticate headlessly with LinkedIn credentials. 3. LinkedIn sometimes embeds videos from licdn.com CDN — yt-dlp handles this if it receives valid LinkedIn session cookies. 4. Retry try_ytdlp with session cookies after authentication. 5. Company page videos may require following the company — if still failing, use inspect_page_network to find the CDN URL directly.",
+    "solution_steps": ["authenticate_headless(url='https://www.linkedin.com/login', domain='linkedin.com')", "try_ytdlp(url=url, cookies_path=saved_cookies)", "inspect_page_network(url=url)"],
+    "requires_auth": true,
+    "requires_cookies": true,
+    "tags": ["linkedin", "professional", "login-required", "licdn"]
+  },
+  {
+    "domain_pattern": ".*",
+    "problem": "Cloudflare bot protection: 403 with 'cf-ray' header or Cloudflare challenge page",
+    "cot": "1. Cloudflare blocks automated downloaders with JS challenges. 2. yt-dlp cannot solve JS challenges — a real browser is needed. 3. Use inspect_page_network: Playwright Chromium can usually pass basic Cloudflare challenges and will capture the cf_clearance cookie. 4. Save the cookies set during page load (especially cf_clearance and __cf_bm). 5. Retry try_ytdlp with those cookies AND the same User-Agent that Playwright used — Cloudflare fingerprints both together.",
+    "solution_steps": ["inspect_page_network(url=url)", "try_ytdlp(url=url, extra_opts={'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}}, cookies_path=playwright_cookies)"],
+    "requires_auth": false,
+    "requires_cookies": true,
+    "tags": ["cloudflare", "bot-protection", "403", "cf_clearance", "challenge"]
+  },
+  {
+    "domain_pattern": ".*",
+    "problem": "Unsupported URL: yt-dlp has no extractor for this site and returns 'Unsupported URL'",
+    "cot": "1. yt-dlp only supports sites with built-in extractors. 2. For unsupported sites the raw stream URL must be found manually. 3. Use inspect_page_network to load the page in a real browser and intercept all network requests. 4. Filter intercepted URLs for video signatures: .m3u8, .mp4, .webm, /manifest, CDN hostnames. 5. Try try_ytdlp on each candidate — yt-dlp can download direct HTTP/HLS streams even without a site-specific extractor. 6. As last resort, pass 'external_downloader: ffmpeg' in extra_opts for raw stream pull.",
+    "solution_steps": ["inspect_page_network(url=url)", "try_ytdlp(url=intercepted_stream_url)", "try_ytdlp(url=intercepted_stream_url, extra_opts={'external_downloader': 'ffmpeg'})"],
+    "requires_auth": false,
+    "requires_cookies": false,
+    "tags": ["unsupported", "no-extractor", "generic-fallback", "hls", "m3u8"]
+  },
+  {
+    "domain_pattern": ".*",
+    "problem": "Generic HLS/m3u8 stream: video plays in browser but yt-dlp cannot find or access the stream",
+    "cot": "1. Many modern video sites dynamically generate stream URLs via JavaScript — yt-dlp cannot execute JS to discover them. 2. Use inspect_page_network to load the page in a headless Chromium that executes JS and intercepts all requests. 3. Look for .m3u8, .mpd (DASH), or large binary requests from CDN hosts in the intercepted URLs. 4. The stream URL may contain auth tokens in the query string — use it immediately, tokens expire. 5. Pass any Authorization or Cookie headers from the intercepted request into try_ytdlp via extra_opts http_headers.",
+    "solution_steps": ["inspect_page_network(url=url)", "try_ytdlp(url=intercepted_url, extra_opts={'http_headers': intercepted_headers})"],
+    "requires_auth": false,
+    "requires_cookies": false,
+    "tags": ["hls", "m3u8", "dash", "javascript", "dynamic", "cdn", "auth-token"]
+  },
+  {
+    "domain_pattern": "dailymotion.com",
+    "problem": "Dailymotion video fails or is age-restricted",
+    "cot": "1. Try with format 'best' first — Dailymotion format IDs are unstable. 2. If age-restricted, cookies from a logged-in Dailymotion account are needed. 3. Authenticate headlessly with Dailymotion credentials. 4. Embedded Dailymotion players may use a different base URL — ensure the canonical dailymotion.com/video/ID format is used, not embed URLs.",
+    "solution_steps": ["try_ytdlp(url=url, extra_opts={'format': 'best'})", "authenticate_headless(url='https://www.dailymotion.com/signin', domain='dailymotion.com')", "try_ytdlp(url=url, extra_opts={'format': 'best'}, cookies_path=saved_cookies)"],
+    "requires_auth": false,
+    "requires_cookies": true,
+    "tags": ["dailymotion", "age-restricted", "format", "embed"]
+  },
+  {
+    "domain_pattern": ".*live.*|.*stream.*|.*watch.*",
+    "problem": "Live stream or streaming site: video plays in browser but URL has time-limited auth token",
+    "cot": "1. Live streams use HLS or DASH with time-limited authentication tokens embedded in the URL or passed as headers. 2. Use inspect_page_network to capture the actual stream request including full URL with query params and any Authorization headers. 3. The token is time-limited — use try_ytdlp on the captured URL immediately. 4. Include any Authorization or Cookie headers from the intercepted request via extra_opts http_headers. 5. If the token expires before download completes, the stream must be re-captured.",
+    "solution_steps": ["inspect_page_network(url=url)", "try_ytdlp(url=intercepted_url_with_token, extra_opts={'http_headers': captured_auth_headers})"],
+    "requires_auth": false,
+    "requires_cookies": false,
+    "tags": ["live-stream", "hls", "auth-token", "time-limited", "authorization-header"]
+  }
+]
