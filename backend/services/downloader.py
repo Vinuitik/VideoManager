@@ -3,15 +3,17 @@ import yt_dlp
 from config import VIDEOS_DIR
 
 
-def build_ydl_opts(progress_hook: Callable) -> dict:
-    return {
+def build_ydl_opts(progress_hook: Callable | None) -> dict:
+    opts = {
         "outtmpl": f"{VIDEOS_DIR}/%(title)s.%(ext)s",
-        "progress_hooks": [progress_hook],
         "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "merge_output_format": "mp4",
         "quiet": True,
         "no_warnings": True,
     }
+    if progress_hook is not None:
+        opts["progress_hooks"] = [progress_hook]
+    return opts
 
 
 def _parse_percent(raw: str) -> float:
