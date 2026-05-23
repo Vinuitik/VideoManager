@@ -1,13 +1,14 @@
 """
-Version A — Polling.
+Version A — Polling with agent escalation.
 
 Client POSTs a URL, gets a job_id back immediately.
-yt-dlp runs in a background thread and writes progress into state.jobs.
-Client polls GET /api/v1/jobs/{job_id} as often as it likes.
+Phase 1: yt-dlp runs in executor. On success → done.
+Phase 2: on failure, AgentLoop runs async — tries RAG, browser inspection, auth.
+Client polls GET /api/v1/jobs/{job_id}; status field shows current phase.
 
-At scale this pattern is replaced by: Redis for the state store + a
-proper job queue (Celery / RQ / ARQ) for the background work.
+Status values: queued | downloading | agent | agent_waiting_input | done | error
 """
+import asyncio
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 import state
@@ -20,8 +21,14 @@ class DownloadRequest(BaseModel):
     url: str
 
 
-def _run_download(job: state.Job) -> None:
-    """Runs in a background thread. Updates job in-place so polls see live data."""
+class AgentInputResponse(BaseModel):
+    value: str
+
+
+async def _run_download_with_agent(job: state.Job) -> None:
+    loop = asyncio.get_event_loop()
+    ytdlp_failed = False
+
     def hook(d: dict) -> None:
         p = parse_progress(d)
         if d["status"] == "downloading":
@@ -34,21 +41,32 @@ def _run_download(job: state.Job) -> None:
             job.progress = 100.0
             job.filename = p["filename"]
 
-    try:
-        filename = download_sync(job.url, hook)
-        job.filename = filename
-        job.status = "done"
-        job.progress = 100.0
-    except Exception as e:
-        job.status = "error"
-        job.error = str(e)
+    def _ytdlp_sync() -> None:
+        nonlocal ytdlp_failed
+        try:
+            filename = download_sync(job.url, hook)
+            job.filename = filename
+            job.status = "done"
+            job.progress = 100.0
+        except Exception as exc:
+            job.error = str(exc)
+            ytdlp_failed = True
+
+    await loop.run_in_executor(None, _ytdlp_sync)
+
+    if ytdlp_failed:
+        try:
+            from agent.loop import AgentLoop
+            await AgentLoop(job).run()
+        except Exception as exc:
+            job.status = "error"
+            job.error = f"Agent failed: {exc}"
 
 
 @router.post("/download")
 async def start_download_poll(req: DownloadRequest, background_tasks: BackgroundTasks):
     job = state.new_job(req.url)
-    # FastAPI runs sync background tasks in a threadpool — won't block the event loop
-    background_tasks.add_task(_run_download, job)
+    background_tasks.add_task(_run_download_with_agent, job)
     return {"job_id": job.job_id}
 
 
@@ -65,4 +83,20 @@ async def get_job(job_id: str):
         "eta": job.eta,
         "filename": job.filename,
         "error": job.error,
+        "agent_log": job.agent_log,
+        "agent_input_request": job.agent_input_request,
     }
+
+
+@router.post("/jobs/{job_id}/input")
+async def send_agent_input(job_id: str, body: AgentInputResponse):
+    """Provide a response when the agent is waiting for user input (CAPTCHA, MFA, etc.)."""
+    job = state.jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.status != "agent_waiting_input":
+        raise HTTPException(400, "Job is not waiting for input")
+    job.input_response = body.value
+    if job._input_event:
+        job._input_event.set()
+    return {"status": "received"}
