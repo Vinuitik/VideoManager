@@ -12,13 +12,18 @@ import asyncio
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 import state
-from services.downloader import download_sync, parse_progress
+from services.downloader import download_sync, fetch_subs, parse_progress
 
 router = APIRouter()
 
 
 class DownloadRequest(BaseModel):
     url: str
+
+
+class SubsRequest(BaseModel):
+    url: str
+    lang: str = "en"
 
 
 class AgentInputResponse(BaseModel):
@@ -68,6 +73,17 @@ async def start_download_poll(req: DownloadRequest, background_tasks: Background
     job = state.new_job(req.url)
     background_tasks.add_task(_run_download_with_agent, job)
     return {"job_id": job.job_id}
+
+
+@router.post("/subs")
+async def fetch_subtitles(req: SubsRequest):
+    """Captions only, no video download — synchronous (a few seconds).
+    Used by the ObsidianOptimizer ingest agent's captions-fast-path."""
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(None, fetch_subs, req.url, req.lang)
+    except Exception as exc:
+        raise HTTPException(422, f"subs unavailable: {exc}")
 
 
 @router.get("/jobs/{job_id}")

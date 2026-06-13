@@ -88,6 +88,12 @@ POST /api/v1/jobs/{job_id}/input {value}
   → job.input_response = value
   → job._input_event.set()   wakes the agent loop if it's waiting for user input
   Use when: agent encounters CAPTCHA, MFA, or another interactive challenge
+
+POST /api/v1/subs {url, lang?="en"}
+  → routers/download_poll.fetch_subtitles() → services/downloader.fetch_subs()
+  → yt-dlp captions only (skip_download, manual subs preferred over auto-subs)
+  → {vtt, title, duration_s} | 422 when no captions exist
+  Consumer: ObsidianOptimizer embedder/ingest (captions-fast-path, INGEST_AGENT_ARCH decision 3)
 ```
 
 Why `run_in_executor` for yt-dlp: yt-dlp has no async API. Calling it directly in an async function blocks the event loop for minutes, preventing all other downloads/requests. The executor runs it in a separate thread while the event loop stays free.

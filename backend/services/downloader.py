@@ -1,4 +1,7 @@
+import tempfile
+from pathlib import Path
 from typing import Callable
+
 import yt_dlp
 from config import VIDEOS_DIR
 
@@ -28,6 +31,35 @@ def download_sync(url: str, progress_hook: Callable) -> str:
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         return ydl.prepare_filename(info)
+
+
+def fetch_subs(url: str, lang: str = "en") -> dict:
+    """Captions only, no video download (ObsidianOptimizer ingest fast path).
+
+    Prefers manual subtitles over YouTube auto-subs. Returns
+    {"vtt": str, "title": str, "duration_s": float} — raises if neither exists.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        opts = {
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": [lang],
+            "subtitlesformat": "vtt",
+            "outtmpl": f"{tmp}/subs.%(ext)s",
+            "quiet": True,
+            "no_warnings": True,
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+        vtts = sorted(Path(tmp).glob("*.vtt"))
+        if not vtts:
+            raise RuntimeError(f"no {lang} captions available for {url}")
+        return {
+            "vtt": vtts[0].read_text(encoding="utf-8"),
+            "title": info.get("title", url),
+            "duration_s": float(info.get("duration") or 0),
+        }
 
 
 def parse_progress(d: dict) -> dict:
