@@ -1,0 +1,6 @@
+# LITE downloader deps only — the yt-dlp half of VideoManager.
+# Full stack (agent/RAG/MCP/browser) deps live in requirements.txt.
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+yt-dlp>=2024.5.27
+websockets>=12.0

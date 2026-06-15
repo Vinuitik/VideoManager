@@ -1,0 +1,23 @@
+# LITE downloader — one container, just yt-dlp behind a small FastAPI.
+# Use this when you only want "download a resource for offline viewing" and don't
+# need the Ollama/Chroma/Playwright agent. The ObsidianOptimizer browser extension
+# points its "Download" feature here.
+#
+#   docker compose -f docker-compose.lite.yml up --build
+#
+# Host port 8001 (the full stack uses 8000, so both can run side by side).
+# Downloads land in the same C:/Users/ACER/Desktop/YT-Videos folder.
+services:
+
+  downloader:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.lite
+    environment:
+      VIDEOS_DIR: /videos
+      AGENT_ESCALATION: "0"
+    volumes:
+      - C:/Users/ACER/Desktop/YT-Videos:/videos
+    ports:
+      - "8001:8000"
+    restart: unless-stopped

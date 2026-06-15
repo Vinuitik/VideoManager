@@ -1,0 +1,19 @@
+# LITE downloader image — yt-dlp + ffmpeg only. No Playwright/Chromium layer, so
+# it builds in seconds and stays small (the full Dockerfile pulls Chromium + deps).
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements-lite.txt .
+RUN pip install --no-cache-dir -r requirements-lite.txt
+
+COPY . .
+
+# AGENT_ESCALATION=0 → a yt-dlp failure returns a plain error instead of trying to
+# import the agent (whose deps aren't installed in this image).
+ENV AGENT_ESCALATION=0
+
+CMD ["uvicorn", "lite:app", "--host", "0.0.0.0", "--port", "8000"]

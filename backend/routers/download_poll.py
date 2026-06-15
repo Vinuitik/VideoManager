@@ -9,12 +9,20 @@ Client polls GET /api/v1/jobs/{job_id}; status field shows current phase.
 Status values: queued | downloading | agent | agent_waiting_input | done | error
 """
 import asyncio
+import os
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 import state
 from services.downloader import download_sync, fetch_subs, parse_progress
 
 router = APIRouter()
+
+# Agent escalation (RAG + headless browser + auth) is the heavy half of VideoManager.
+# Default ON keeps full-stack behaviour identical; the LITE downloader sets
+# AGENT_ESCALATION=0 so a yt-dlp failure reports a plain error instead of importing
+# the agent (which needs Ollama/Chroma/Playwright that lite intentionally omits).
+def _agent_escalation_enabled() -> bool:
+    return os.getenv("AGENT_ESCALATION", "1").lower() not in ("0", "false", "no")
 
 
 class DownloadRequest(BaseModel):
@@ -60,6 +68,9 @@ async def _run_download_with_agent(job: state.Job) -> None:
     await loop.run_in_executor(None, _ytdlp_sync)
 
     if ytdlp_failed:
+        if not _agent_escalation_enabled():
+            job.status = "error"  # lite mode: yt-dlp only, no agent escalation
+            return
         try:
             from agent.loop import AgentLoop
             await AgentLoop(job).run()
